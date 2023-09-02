@@ -17,7 +17,7 @@ from pathlib import Path
 from vghbot_kit import gsheet
 from vghbot_kit import updater_cmd
 
-# pyinstaller --paths ".\.venv-opd\Lib\site-packages\uiautomation\bin" -F vghbot_opd.py 
+# pyinstaller --paths ".\.venv\Lib\site-packages\uiautomation\bin" -F vghbot_opd.py 
 
 # ==== 基本操作架構
 def process_exists(process_name):
@@ -2011,7 +2011,7 @@ CONFIG = {}
 
 UPDATER_OWNER = 'zmh00'
 UPDATER_REPO = 'vghbot_opd'
-UPDATER_FILENAME = 'vghbot_opd'
+UPDATER_FILENAME = 'opd'
 UPDATER_VERSION_TAG = 'v1.0'
 
 gc = gsheet.GsheetClient()
