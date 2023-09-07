@@ -454,15 +454,15 @@ def datagrid_search(search_text: list, datagrid, column_name=None, retry=5, only
     return target_list
     
 
-def click_blockinput(control, doubleclick=False, simulateMove=False, waitTime = 0.2):
+def click_blockinput(control, doubleclick=False, simulateMove=False, waitTime = 0.2, x=None, y=None):
     try:
         res = windll.user32.BlockInput(True)
         if TEST_MODE:
             auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|Control:{control.Name}|{control.GetClickablePoint()}", auto.ConsoleColor.Yellow)
         if doubleclick:
-            control.DoubleClick(waitTime=waitTime, simulateMove=simulateMove)
+            control.DoubleClick(waitTime=waitTime, simulateMove=simulateMove, x=x, y=y)
         else:
-            control.Click(waitTime=waitTime, simulateMove=simulateMove)
+            control.Click(waitTime=waitTime, simulateMove=simulateMove, x=x, y=y)
     except Exception as e:
         auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|Blockinput&Click Failed: {e}", auto.ConsoleColor.Red) # TODO 如果因為物件不存在而沒點擊到，不會跳出exception，但會有error message=>抓response??
         res = windll.user32.BlockInput(False)
@@ -504,18 +504,36 @@ def click_datagrid(datagrid, target_list:list, doubleclick=False):
     if len(target_list) == 0: # target_list is empty
         return True
     
-    scroll = datagrid.ScrollBarControl(searchDepth=1, Name="垂直捲軸")
-    downpage = scroll.ButtonControl(searchDepth=1, Name="向下翻頁")
     auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|CLICKING DATAGRID: total {len(target_list)} items", auto.ConsoleColor.Yellow)
     remaining_target_list = target_list.copy()
+
+    # 抓取卷軸物件
+    v_scroll = datagrid.ScrollBarControl(searchDepth=1, Name="垂直捲軸")
+    downpage = v_scroll.ButtonControl(searchDepth=1, Name="向下翻頁")
+
     if downpage.Exists():
+        # 防止點擊位置在可點擊項目的外面
+        h_scroll = datagrid.ScrollBarControl(searchDepth=1, Name="水平捲軸")
+        if h_scroll.Exists():
+            clickable_bottom = h_scroll.BoundingRectangle.top
+        else:
+            clickable_bottom = datagrid.BoundingRectangle.bottom
+        clickable_right = v_scroll.BoundingRectangle.left
         auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|EXIST: scroll button", auto.ConsoleColor.Yellow)
+
         while True:
             for t in target_list:
                 if t in remaining_target_list:
                     if t.BoundingRectangle.width() != 0 or t.BoundingRectangle.height() != 0:
+                        t_xcenter = (t.BoundingRectangle.left + t.BoundingRectangle.right) / 2
+                        t_ycenter = (t.BoundingRectangle.top + t.BoundingRectangle.bottom) / 2
+                        if t_xcenter > clickable_right or t_ycenter > clickable_bottom:
+                            if TEST_MODE:
+                                auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|CLICKING POSITION OUTSIDE OF THE SCROLLABLE AREA: {t.Name}", auto.ConsoleColor.Red)
+                                auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|XCENTER: {t_xcenter}, YCENTER: {t_ycenter}, CLICKABLE_RIGHT: {clickable_right}, CLICKABLE_BOTTOM: {clickable_bottom}", auto.ConsoleColor.Red)
+                            continue
                         t.SetFocus()
-                        if click_blockinput(t, doubleclick=doubleclick):
+                        if click_blockinput(t, doubleclick=doubleclick): # TODO 這只能確定正常點擊，但物件是否正確成為選擇狀態未知
                             remaining_target_list.remove(t)
             if len(remaining_target_list) == 0: # remaining_target_list is empty
                 return True
@@ -887,19 +905,19 @@ def package_iol_ovd(iol, ovd):
         target_list = datagrid_search([iol, ovd], c_datagrid_pkgorder, only_one=False)
         if len(target_list) < 2:
             auto.Logger.WriteLine(f"LOSS OF RETURN: IOL:{iol}|OVD:{ovd}", auto.ConsoleColor.Red)
-            auto.Logger.WriteLine(f"{[control.GetLegacyIAccessiblePattern().Value for control in target_list]}", auto.ConsoleColor.Red)
+            auto.Logger.WriteLine(f"target_list: {[control.GetLegacyIAccessiblePattern().Value for control in target_list]}", auto.ConsoleColor.Red)
     else:
         auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|No datagrid dgvPkgorder", auto.ConsoleColor.Red)
         return False
     
     # click_datagrid
     residual_list = click_datagrid(c_datagrid_pkgorder, target_list=target_list)
+    if residual_list != True:
+        auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|Residual list:{residual_list}", auto.ConsoleColor.Red)
     # 測試失敗紀錄: legacy.select
-    # search_datagrid(c_datagrid_pkgorder, [iol])[0].GetLegacyIAccessiblePattern().Select(8)  # 無法被select不知道為何
-    # search_datagrid(c_datagrid_pkgorder, [ovd])[0].GetLegacyIAccessiblePattern().Select(8)  # 無法被select不知道為何
     # c_datalist_pkgorder = c_datagrid_pkgorder.GetChildren()
-    # c_datalist_pkgorder[3].GetLegacyIAccessiblePattern().Select(8)
-    # c_datalist_pkgorder[8].GetLegacyIAccessiblePattern().Select(8)
+    # c_datalist_pkgorder[3].GetLegacyIAccessiblePattern().Select(8) # 無法被select不知道為何
+    # c_datalist_pkgorder[8].GetLegacyIAccessiblePattern().Select(8) # 無法被select不知道為何
 
     # confirm
     window_pkgdetail.ButtonControl(searchDepth=1, AutomationId="btnPkgDetailOK").GetInvokePattern().Invoke()
@@ -1780,17 +1798,26 @@ def get_id_psw():
     return login_id, login_psw
 
 
-def get_date_today(mode:str='0'):
+def get_date_today(mode:str=''):
     '''
-    取得今日時間.mode=0(西元紀年)|mode=1(民國紀年)
+    取得今日時間.mode='西元'(西元紀年)|mode='民國'(民國紀年)|mode='伯公'(伯公紀年)
     '''
     mode = str(mode)
-    if mode=='0':
+    if mode=='西元':
         date = datetime.datetime.today().strftime("%Y%m%d") # 西元紀年
         auto.Logger.WriteLine(f"DATE: {date}", auto.ConsoleColor.Yellow)
         return date
-    elif mode=='1':
+    elif mode=='民國':
         date = str(datetime.datetime.today().year-1911) + datetime.datetime.today().strftime("%m%d") # 民國紀年
+        auto.Logger.WriteLine(f"DATE: {date}", auto.ConsoleColor.Yellow)
+        return date
+    elif mode=='伯公':
+        date = datetime.datetime.today().strftime("%Y%m%d") 
+        date = date[2:] # 伯公紀年
+        auto.Logger.WriteLine(f"DATE: {date}", auto.ConsoleColor.Yellow)
+        return date
+    else:
+        date = datetime.datetime.today().strftime("%Y%m%d") # 西元紀年
         auto.Logger.WriteLine(f"DATE: {date}", auto.ConsoleColor.Yellow)
         return date
 
@@ -1831,14 +1858,173 @@ def search_opd_program(path_list, filename_list):
                 return result_list[0]
             
 
-def post_op_1d():
+def main_cata_1d():
     pass
 
-def post_op_1w():
+def main_cata_1w():
     pass
 
-def post_op_1m():
+def main_cata_1m():
     pass    
+
+
+def main_cata():
+    while True:
+        gc = gsheet.GsheetClient()
+        df = gc.get_df(gsheet.GSHEET_SPREADSHEET, gsheet.GSHEET_WORKSHEET_SURGERY) # 讀取config
+        selected_col = ['INDEX','VS_CODE','SPREADSHEET','WORKSHEET']
+        selected_df = df.loc[:, selected_col]
+        selected_df.index +=1 # 讓index從1開始方便選擇
+        selected_df.rename(columns={'INDEX':'組套名'}, inplace=True) # rename column
+        # 印出現有組套讓使用者選擇
+        print("\n=========================")
+        print(selected_df) 
+        print("=========================")
+        selection = input("請選擇以上profile(0是退回): ").strip()
+        if selection == '0': # 等於0 => 退到上一層
+            return
+        else:
+            if int(selection) not in selected_df.index:
+                auto.Logger.WriteLine(f"WRONG PROFILE INPUT", auto.ConsoleColor.Red)
+            else:
+                config_schedule = df.loc[int(selection)-1,:].to_dict() # 讀取刀表設定檔
+                if config_schedule['VS_CODE'] == CONFIG['DEFAULT']:
+                    dr_code = input("Using default config...please enter the short code of VS (Ex:4123): ")
+                else:
+                    dr_code = config_schedule['VS_CODE']
+
+                # 載入要操作OPD系統的帳密
+                login_id, login_psw = gsheet_acc(dr_code)
+                if login_id is None or login_psw is None:
+                    login_id, login_psw = get_id_psw()
+                    dr_code = login_id[3:7]
+                    
+                # 獲取刀表內容+日期模式
+                date = get_date_today(config_schedule['OPD_DATE_MODE'])
+                df = gsheet_schedule_cata(config_schedule)
+
+                # 開啟門診程式
+                login(login_id, login_psw, CONFIG['SECTION_CATA'][0], CONFIG['ROOM_CATA'][0])
+
+                # 將所有病歷號加入非常態掛號
+                hisno_list = df[config_schedule['COL_HISNO']].to_list()
+                main_appointment(hisno_list)
+                
+                # 取得已有暫存list => 之後處理部分會跳過
+                exclude_hisno_list = main_excluded_hisno_list(hisno_list)
+                if len(exclude_hisno_list) > 0:
+                    choice = input("跳過已暫存資料(Enter:是|n:否): ")
+                    if choice.strip().lower() != '':
+                        exclude_hisno_list = []
+                
+                # 逐一病人處理
+                df.set_index(keys=config_schedule['COL_HISNO'], inplace=True)
+                for hisno in hisno_list:
+                    # 跳過已有暫存者
+                    if hisno in exclude_hisno_list:
+                        auto.Logger.WriteLine(f"Already saved: {hisno}", auto.ConsoleColor.Yellow)
+                        continue
+                    
+                    # ditto
+                    res = main_ditto(hisno)
+                    if res == False:
+                        continue
+
+                    # 取得側別資訊
+                    side = gsheet_schedule_side(df_schedule=df, config_schedule=config_schedule, hisno=hisno)
+
+                    # 在Subject框內輸入手術資訊 => 組合手術資訊
+                    diagnosis = diagnosis_cata(df_schedule=df, config_schedule=config_schedule, hisno=hisno, side=side, date=date)
+                    set_S(diagnosis)
+
+                    # 選擇phaco模式
+                    if df.loc[hisno, config_schedule['COL_LENSX']].strip() == '': # 沒有選擇lensx
+                        package_open(index = 31)
+                    elif df.loc[hisno, config_schedule['COL_LENSX']].strip().lower() == 'lensx':
+                        package_open(index = 32)
+                    else:
+                        auto.Logger.WriteLine(f"Lensx資訊辨識問題({df.loc[hisno,config_schedule['COL_LENSX']].strip()}) 先以NHI組套處理", auto.ConsoleColor.Red)
+                        package_open(index = 31)
+                    
+                    # 取得刀表iol資訊
+                    iol = df.loc[hisno, config_schedule['COL_IOL']].strip()
+                    iol_search_term = gsheet_iol(iol) # 尋找刀表IOL資訊的正式搜尋名稱
+                    if iol_search_term is None:
+                        auto.Logger.WriteLine(f"無此IOL({iol})登錄", auto.ConsoleColor.Red)
+                        continue
+
+                    # 取得該DOC常用OVD
+                    ovd = gsheet_ovd(dr_code)
+                    
+                    # 打開package
+                    if iol_search_term in CONFIG['NHI_IOL']:
+                        package_open(index=29)  # NHI IOL
+                    else:
+                        package_open(index=30)  # SP IOL
+                    # IOL和OVD package設定
+                    package_iol_ovd(iol=iol_search_term, ovd=ovd)
+                    # 修改order的side
+                    order_modify_side(side)
+                    
+                    # 處理藥物
+                    drug_list = gsheet_drug(dr_code, side)
+                    drug(drug_list)
+
+                    # 暫存退出
+                    if TEST_MODE:
+                        input('Press any key to proceed to next patient')
+                    soap_save()
+
+
+def main_ivi(): # FIXME 函數尚未更新
+    # 輸入要操作OPD系統的帳密
+    dr_code = input("Please enter the short code of account (Ex:4123): ")
+    dr_code, login_id, login_psw = gsheet_acc(dr_code)
+
+    # 判斷程式運行與否
+    running, pid = process_exists(CONFIG['PROCESS_NAME'][0])
+
+    # 使用者輸入: 獲取刀表+日期模式
+    config_schedule = gsheet_config_ivi(0) # 使用共用組套
+    date = get_date_today(config_schedule['OPD_DATE_MODE'])
+    df = gsheet_schedule_ivi(config_schedule)
+
+    # 開啟門診程式
+    if running:
+        auto.Logger.WriteLine("OPD program is running", auto.ConsoleColor.Yellow)
+        login_change_opd(login_id, login_psw, CONFIG['SECTION_PROCEDURE'][0], CONFIG['ROOM_PROCEDURE'][0]) 
+    else:
+        login_all(CONFIG['OPD_PATH'],login_id, login_psw, CONFIG['SECTION_PROCEDURE'][0], CONFIG['ROOM_PROCEDURE'][0])
+
+    # 將所有病歷號加入非常態掛號
+    hisno_list = df[config_schedule['COL_HISNO']].to_list()
+    main_appointment(hisno_list)
+
+    # 逐一病人處理
+    df.set_index(keys=config_schedule['COL_HISNO'], inplace=True)
+    for hisno in hisno_list:
+        # ditto
+        main_ditto(hisno)
+        
+        side = df.loc[hisno, config_schedule['COL_SIDE']].strip()
+        charge = df.loc[hisno, config_schedule['COL_CHARGE']].strip()
+        drug_ivi = df.loc[hisno, config_schedule['COL_DRUGTYPE']].strip()
+        # TODO
+        # TODO 要依照charge處理order
+        # TODO 要依照charge決定drug_ivi要不要開上去
+        # TODO 依照charge決定出單方式? => 兩次出單
+
+        
+        # 處理其它藥物
+        other_drug_list = gsheet_drug('ivi')
+        drug(other_drug_list)
+
+        # 在Subject框內輸入手術資訊 => 要先組合手術資訊
+        diagnosis = diagnosis_ivi(df.loc[[hisno], :].to_dict('records')[0], config_schedule, date)
+        set_S(diagnosis)
+
+        # 暫存退出
+        soap_save()
 
 
 def main():
@@ -1851,159 +2037,10 @@ def main():
         if mode.strip() not in ['1','2','0']:
             auto.Logger.WriteLine(f"WRONG MODE INPUT", auto.ConsoleColor.Red)
         elif mode.strip() == '1':
-            while True:
-                gc = gsheet.GsheetClient()
-                df = gc.get_df(gsheet.GSHEET_SPREADSHEET, gsheet.GSHEET_WORKSHEET_SURGERY) # 讀取config
-                selected_col = ['INDEX','VS_CODE','SPREADSHEET','WORKSHEET']
-                selected_df = df.loc[:, selected_col]
-                selected_df.index +=1 # 讓index從1開始方便選擇
-                selected_df.rename(columns={'INDEX':'組套名'}, inplace=True) # rename column
-                # 印出現有組套讓使用者選擇
-                print("\n=========================")
-                print(selected_df) 
-                print("=========================")
-                selection = input("請選擇以上profile(0是退回): ").strip()
-                if selection == '0': # 等於0 => 退到上一層
-                    break
-                else:
-                    if int(selection) not in selected_df.index:
-                        auto.Logger.WriteLine(f"WRONG PROFILE INPUT", auto.ConsoleColor.Red)
-                    else:
-                        config_schedule = df.loc[int(selection)-1,:].to_dict() # 讀取刀表設定檔
-                        if config_schedule['VS_CODE'] == CONFIG['DEFAULT']:
-                            dr_code = input("Using default config...please enter the short code of VS (Ex:4123): ")
-                        else:
-                            dr_code = config_schedule['VS_CODE']
-
-                        # 載入要操作OPD系統的帳密
-                        login_id, login_psw = gsheet_acc(dr_code)
-                        if login_id is None or login_psw is None:
-                            login_id, login_psw = get_id_psw()
-                            dr_code = login_id[3:7]
-                            
-                        # 獲取刀表內容+日期模式
-                        date = get_date_today(config_schedule['OPD_DATE_MODE'])
-                        df = gsheet_schedule_cata(config_schedule)
-
-                        # 開啟門診程式
-                        login(login_id, login_psw, CONFIG['SECTION_CATA'][0], CONFIG['ROOM_CATA'][0])
-
-                        # 將所有病歷號加入非常態掛號
-                        hisno_list = df[config_schedule['COL_HISNO']].to_list()
-                        main_appointment(hisno_list)
-                        
-                        # 取得已有暫存list => 之後處理部分會跳過
-                        exclude_hisno_list = main_excluded_hisno_list(hisno_list)
-                        if len(exclude_hisno_list) > 0:
-                            choice = input("跳過已暫存資料(Enter:是|n:否): ")
-                            if choice.strip().lower() != '':
-                                exclude_hisno_list = []
-                        
-                        # 逐一病人處理
-                        df.set_index(keys=config_schedule['COL_HISNO'], inplace=True)
-                        for hisno in hisno_list:
-                            # 跳過已有暫存者
-                            if hisno in exclude_hisno_list:
-                                auto.Logger.WriteLine(f"Already saved: {hisno}", auto.ConsoleColor.Yellow)
-                                continue
-                            
-                            # ditto
-                            res = main_ditto(hisno)
-                            if res == False:
-                                continue
-
-                            # 選擇phaco模式
-                            if df.loc[hisno, config_schedule['COL_LENSX']].strip() == '': # 沒有選擇lensx
-                                package_open(index = 31)
-                            elif df.loc[hisno, config_schedule['COL_LENSX']].strip().lower() == 'lensx':
-                                package_open(index = 32)
-                            else:
-                                auto.Logger.WriteLine(f"Lensx資訊辨識問題({df.loc[hisno,config_schedule['COL_LENSX']].strip()}) 先以NHI組套處理", auto.ConsoleColor.Red)
-                                package_open(index = 31)
-                            
-                            # 取得側別資訊
-                            side = gsheet_schedule_side(df_schedule=df, config_schedule=config_schedule, hisno=hisno)
-
-                            # 在Subject框內輸入手術資訊 => 組合手術資訊
-                            diagnosis = diagnosis_cata(df_schedule=df, config_schedule=config_schedule, hisno=hisno, side=side, date=date)
-                            set_S(diagnosis)
-
-                            # 取得刀表iol資訊
-                            iol = df.loc[hisno, config_schedule['COL_IOL']].strip()
-                            iol_search_term = gsheet_iol(iol) # 尋找刀表IOL資訊的正式搜尋名稱
-                            if iol_search_term is None:
-                                auto.Logger.WriteLine(f"無此IOL({iol})登錄", auto.ConsoleColor.Red)
-                                continue
-
-                            # 取得該DOC常用OVD
-                            ovd = gsheet_ovd(dr_code)
-                            
-                            # 打開package
-                            if iol_search_term in CONFIG['NHI_IOL']:
-                                package_open(index=29)  # NHI IOL
-                            else:
-                                package_open(index=30)  # SP IOL
-                            # IOL和OVD package設定
-                            package_iol_ovd(iol=iol_search_term, ovd=ovd)
-                            # 修改order的side
-                            order_modify_side(side)
-                            
-                            # 處理藥物
-                            drug_list = gsheet_drug(dr_code, side)
-                            drug(drug_list)
-
-                            # 暫存退出
-                            soap_save()
-        
-        elif mode.strip() == '2': # IVI  # FIXME 有些函數尚未更新
-            # 輸入要操作OPD系統的帳密
-            dr_code = input("Please enter the short code of account (Ex:4123): ")
-            dr_code, login_id, login_psw = gsheet_acc(dr_code)
-
-            # 判斷程式運行與否
-            running, pid = process_exists(CONFIG['PROCESS_NAME'][0])
-
-            # 使用者輸入: 獲取刀表+日期模式
-            config_schedule = gsheet_config_ivi(0) # 使用共用組套
-            date = get_date_today(config_schedule['OPD_DATE_MODE'])
-            df = gsheet_schedule_ivi(config_schedule)
-
-            # 開啟門診程式
-            if running:
-                auto.Logger.WriteLine("OPD program is running", auto.ConsoleColor.Yellow)
-                login_change_opd(login_id, login_psw, CONFIG['SECTION_PROCEDURE'][0], CONFIG['ROOM_PROCEDURE'][0]) 
-            else:
-                login_all(CONFIG['OPD_PATH'],login_id, login_psw, CONFIG['SECTION_PROCEDURE'][0], CONFIG['ROOM_PROCEDURE'][0])
-
-            # 將所有病歷號加入非常態掛號
-            hisno_list = df[config_schedule['COL_HISNO']].to_list()
-            main_appointment(hisno_list)
-
-            # 逐一病人處理
-            df.set_index(keys=config_schedule['COL_HISNO'], inplace=True)
-            for hisno in hisno_list:
-                # ditto
-                main_ditto(hisno)
-                
-                side = df.loc[hisno, config_schedule['COL_SIDE']].strip()
-                charge = df.loc[hisno, config_schedule['COL_CHARGE']].strip()
-                drug_ivi = df.loc[hisno, config_schedule['COL_DRUGTYPE']].strip()
-                # TODO
-                # TODO 要依照charge處理order
-                # TODO 要依照charge決定drug_ivi要不要開上去
-                # TODO 依照charge決定出單方式? => 兩次出單
-
-                
-                # 處理其它藥物
-                other_drug_list = gsheet_drug('ivi')
-                drug(other_drug_list)
-
-                # 在Subject框內輸入手術資訊 => 要先組合手術資訊
-                diagnosis = diagnosis_ivi(df.loc[[hisno], :].to_dict('records')[0], config_schedule, date)
-                set_S(diagnosis)
-
-                # 暫存退出
-                soap_save()
+            main_cata()
+        elif mode.strip() == '2': # IVI
+            main_ivi()
+            
 
 
 TEST_MODE = False
@@ -2012,7 +2049,7 @@ CONFIG = {}
 UPDATER_OWNER = 'zmh00'
 UPDATER_REPO = 'vghbot_opd'
 UPDATER_FILENAME = 'opd'
-UPDATER_VERSION_TAG = 'v1.0'
+UPDATER_VERSION_TAG = 'v1.1'
 
 gc = gsheet.GsheetClient()
 CONFIG.update(gc.get_col_dict(gsheet.GSHEET_SPREADSHEET, gsheet.GSHEET_WORKSHEET_CONFIG))
@@ -2036,6 +2073,7 @@ if __name__ == '__main__':
                 print('RunScriptAsAdmin', sys.executable, sys.argv)
                 auto.RunScriptAsAdmin(sys.argv)
         else: 
+            print("===========測試模式===========")
             main()
     except:
         auto.Logger.WriteLine(f"Error Message:\n{traceback.format_exc()}", auto.ConsoleColor.Red)
