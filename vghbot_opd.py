@@ -9,13 +9,18 @@ from ctypes import windll
 import sys
 import subprocess
 import traceback
+import json
 
 import pandas
 import datetime
+import webbrowser
 
 from pathlib import Path
 from vghbot_kit import gsheet
 from vghbot_kit import updater_cmd
+from vghbot_kit import vghbot_login
+# import playwright
+# from bs4 import BeautifulSoup
 
 # pyinstaller --paths ".\.venv\Lib\site-packages\uiautomation\bin" -F vghbot_opd.py 
 
@@ -70,54 +75,37 @@ def captureimage(control = None, postfix = ''):
     # c.CaptureToImage(path)
 
 
-def window_dfs(processId, search_from = None, depth=0, maxDepth=2, only_one = False):
+def window_search_enabled(processId, search_from = None, depth=0, maxDepth=2):
     '''
-    監控指定PID程序下新視窗的產生，DFS方式搜尋，只回傳enabled的視窗
-    如果only_one == True，會直接回傳一個control;如果only_one == False，會回傳一個control list
+    監控指定PID程序下新視窗的產生，DFS方式搜尋，只回傳第一個符合且enabled視窗
     '''
     if type(processId) == str:
         processId = int(processId)
-    
-    target_list = []
-    if depth > maxDepth:
-        if only_one is True:
-            return None
-        else:
-            return target_list
-    
+
     if search_from is None:
         search_from = auto.GetRootControl()
-    
+
+        
+    if depth > maxDepth: # 超過深度
+        return None
+
     t_start = time.perf_counter()
     for control, _depth in auto.WalkControl(search_from, maxDepth=1):
         if (control.ProcessId == processId) and (control.ControlType==auto.ControlType.WindowControl):
             if control.IsEnabled ==  True: # 利用別的判斷方式? control.GetWindowPattern().WindowInteractionState
-                if only_one is True:
-                    if TEST_MODE:
-                        t_end = time.perf_counter()
-                        auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|監控第{depth}層以下共花費:{t_end-t_start}")
-                    return control
-                else:
-                    target_list.append(control)
+                if TEST_MODE:
+                    auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|找到元件:{control.Name}|花費:{time.perf_counter()-t_start}")
+                return control
             else:
-                depth = depth + 1
-                l = window_dfs(processId=processId, search_from=control, depth=depth, maxDepth=maxDepth, only_one=only_one)
-                if only_one is True and l is None:
-                    continue
-                elif only_one is True and l is not None:
-                    if TEST_MODE:
-                        t_end = time.perf_counter()
-                        auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|監控第{depth}層以下共花費:{t_end-t_start}")
+                next_depth = depth + 1
+                if TEST_MODE:
+                    auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|繼續遞迴搜尋|父節點:{control.Name}|深度:{next_depth}")
+                
+                l = window_search_enabled(processId=processId, search_from=control, depth=next_depth, maxDepth=maxDepth)
+                if l is not None:
                     return l
-                else:
-                    target_list.extend(l)
-    if TEST_MODE:
-        t_end = time.perf_counter()
-        auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|監控第{depth}層以下共花費:{t_end-t_start}")
-    if only_one is True:
-        return None
-    else:
-        return target_list
+    return None # 都找不到
+    
 
 def window_check_exist_enabled(control: auto.WindowControl):
     auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|== TopWindow (Name:{control.Name}|AutomationId:{control.AutomationId}) ==")
@@ -136,56 +124,78 @@ def window_policy(control: auto.WindowControl):
     設定每個視窗處理方式的函數，將條件較唯一的放在較上面(control.AutomationId or control.Name)
     '''
     try:
-        if control.AutomationId == "frmDCRSignOn": # 登入介面
-            if window_check_exist_enabled(control):
-                acc = control.EditControl(AutomationId="txtSignOnID", Depth=1)
-                acc.GetValuePattern().SetValue(CONFIG['ACCOUNT'])
-                psw = control.EditControl(AutomationId="txtSignOnPassword", Depth=1)
-                psw.GetValuePattern().SetValue(CONFIG['PASSWORD'])
-                section = control.EditControl(AutomationId="1001", Depth=2)
-                section.GetValuePattern().SetValue(CONFIG['SECTION_ID'])
-                room = control.EditControl(AutomationId="txtRoom", Depth=1)
-                room.GetValuePattern().SetValue(CONFIG['ROOM_ID'])
-                signin = control.ButtonControl(AutomationId="btnSignon", Depth=1)
-                click_retry(signin)
-            else:
-                return False
-        elif control.AutomationId == "dlgMessageCenter": # 登入後，醫師待辦事項通知
-            if window_check_exist_enabled(control):
+        if TEST_MODE:
+            auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|== Solving Window (Name:{control.Name}|AutomationId:{control.AutomationId}) ==")
+        if hasattr(control, 'AutomationId') and control.AutomationId.strip() !='':
+            if control.AutomationId == "frmDCRSignOn": # 登入介面
+                if window_check_exist_enabled(control):
+                    acc = control.EditControl(AutomationId="txtSignOnID", Depth=1)
+                    acc.GetValuePattern().SetValue(CONFIG['ACCOUNT'])
+                    psw = control.EditControl(AutomationId="txtSignOnPassword", Depth=1)
+                    psw.GetValuePattern().SetValue(CONFIG['PASSWORD'])
+                    section = control.EditControl(AutomationId="1001", Depth=2)
+                    section.GetValuePattern().SetValue(CONFIG['SECTION_ID'])
+                    room = control.EditControl(AutomationId="txtRoom", Depth=1)
+                    room.GetValuePattern().SetValue(CONFIG['ROOM_ID'])
+                    signin = control.ButtonControl(AutomationId="btnSignon", Depth=1)
+                    click_retry(signin)
+                else:
+                    return False
+            elif control.AutomationId == "dlgMessageCenter": # 登入後，醫師待辦事項通知
+                if window_check_exist_enabled(control):
+                    control.GetWindowPattern().Close()
+                else:
+                    return False
+            elif control.AutomationId == "dlgNewTOCC": # DITTO，詢問TOCC
+                if window_check_exist_enabled(control):
+                    control.CheckBoxControl(Depth=2, AutomationId="ckbAllNo").GetTogglePattern().Toggle()
+                    control.ButtonControl(Depth=2, AutomationId="btnOK").GetInvokePattern().Invoke()
+                else:
+                    return False
+            elif control.AutomationId == "dlgSMOBET": # DITTO，健康行為登錄
+                if window_check_exist_enabled(control):
+                    control.GetWindowPattern().Close()
+                else:
+                    return False
+            elif control.AutomationId == "dlgWarMessage": # DITTO，警告提示訊息; 登入後，醫事卡非登入醫師本人通知
+                if window_check_exist_enabled(control):
+                    control.GetWindowPattern().Close() # TODO 適用兩個狀況嗎?
+                    # c_button_ok = control.ButtonControl(searchDepth=1, AutomationId="OK_Button", SubName="繼續")
+                    # c_button_ok.GetInvokePattern().Invoke()
+                else:
+                    return False
+            elif control.AutomationId == "dlgDrugAllergyDetailAndEdit": # DITTO後過敏提示視窗
+                if window_check_exist_enabled(control):
+                    control.ButtonControl(Depth=3, SubName='無需更新', AutomationId="Button1").GetInvokePattern().Invoke()
+                else:
+                    return False
+            elif control.AutomationId == "FlaxibleMessage": # 改變OPD時，跳出警告訊息;
+                if window_check_exist_enabled(control):
+                    control.ButtonControl(Depth=2, AutomationId="btnOK").GetInvokePattern().Invoke()
+                else:
+                    return False
+            # elif control.AutomationId == "##########": # 複製用樣板
+            #     if window_check_exist_enabled(control):
+            #         control.GetWindowPattern().Close()
+            #     else:
+            #         return False
+            else: # 未登錄AutomationId視窗
+                auto.Logger.WriteLine(f"TopWindow (Name:{control.Name}|AutomationId:{control.AutomationId}) => No available policy (Unknown AutomationId)")
+                captureimage(postfix=inspect.currentframe().f_code.co_name)
                 control.GetWindowPattern().Close()
-            else:
-                return False
-        elif control.AutomationId == "##########": # 複製用樣板
+        elif control.Name == "提示訊息":
             if window_check_exist_enabled(control):
-                control.GetWindowPattern().Close()
-            else:
-                return False
-        elif control.AutomationId == "dlgNewTOCC": # DITTO，詢問TOCC
-            if window_check_exist_enabled(control):
-                control.CheckBoxControl(Depth=2, AutomationId="ckbAllNo").GetTogglePattern().Toggle()
-                control.ButtonControl(Depth=2, AutomationId="btnOK").GetInvokePattern().Invoke()
-            else:
-                return False
-        elif control.AutomationId == "dlgSMOBET": # DITTO，健康行為登錄
-            if window_check_exist_enabled(control):
-                control.GetWindowPattern().Close()
-            else:
-                return False
-        elif control.AutomationId == "dlgWarMessage": # DITTO，警告提示訊息; 登入後，醫事卡非登入醫師本人通知
-            if window_check_exist_enabled(control):
-                control.GetWindowPattern().Close() # TODO 適用兩個狀況嗎?
-                # c_button_ok = control.ButtonControl(searchDepth=1, AutomationId="OK_Button", SubName="繼續")
-                # c_button_ok.GetInvokePattern().Invoke()
-            else:
-                return False
-        elif control.AutomationId == "dlgDrugAllergyDetailAndEdit": # DITTO後過敏提示視窗
-            if window_check_exist_enabled(control):
-                control.ButtonControl(Depth=3, SubName='無需更新', AutomationId="Button1").GetInvokePattern().Invoke()
-            else:
-                return False
-        elif control.AutomationId == "FlaxibleMessage": # 改變OPD時，跳出警告訊息;
-            if window_check_exist_enabled(control):
-                control.ButtonControl(Depth=2, AutomationId="btnOK").GetInvokePattern().Invoke()
+                if control.TextControl(searchDepth=1, SubName="該病患目前住院中").Exists(): # 病人住院身分警告
+                    button = control.ButtonControl(searchDepth=1, SubName="確定")
+                    button.GetInvokePattern().Invoke()
+                else:
+                    text = control.TextControl(searchDepth=1)
+                    if text.Exists():
+                        auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|未知訊息視窗:{text.Name}", auto.ConsoleColor.Yellow)
+                    else:
+                        auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|未知訊息視窗", auto.ConsoleColor.Yellow)
+                        captureimage(postfix=inspect.currentframe().f_code.co_name)
+                    control.GetWindowPattern().Close()
             else:
                 return False
         elif control.Name == "訊息":
@@ -207,6 +217,7 @@ def window_policy(control: auto.WindowControl):
             auto.Logger.WriteLine(f"TopWindow (Name:{control.Name}|AutomationId:{control.AutomationId}) => No available policy")
             captureimage(postfix=inspect.currentframe().f_code.co_name)
             control.GetWindowPattern().Close()
+        
         return True
     except Exception as e:
         auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|Something wrong happened:{e}", auto.ConsoleColor.Red)
@@ -214,27 +225,28 @@ def window_policy(control: auto.WindowControl):
 
 def window_pending(processId, pending_control, retry = 5, excluded_control=None):
     '''
-    等待一個指定的視窗，嘗試retry次數內，迴圈去抓目前最底部的視窗，每個不是指定的視窗都交給視窗處理原則，直到指定視窗出現就返回
+    在processId指定下，等待一個指定的視窗，嘗試retry次數內，迴圈去抓目前最頂部的視窗，每個不是指定的視窗都交給視窗處理原則，直到指定視窗出現就返回
     '''
     while retry>=0:
-        time.sleep(0.2)
+        time.sleep(0.4)
         try:
-            top_window = window_dfs(processId=processId, only_one=True)
+            top_window = window_search_enabled(processId=processId)
             if top_window is None:
                 auto.Logger.WriteLine(f"No qualified TopWindow")
-            if (top_window.AutomationId == pending_control.searchProperties.get('AutomationId')) or (top_window.Name == pending_control.searchProperties.get('Name')) or (pending_control.searchProperties.get('SubName', '!@#$') in top_window.Name): 
-                if window_check_exist_enabled(top_window):
-                    auto.Logger.WriteLine(f"PENDING EXIST: (Name:{pending_control.Name}|AutomationId:{pending_control.AutomationId})", auto.ConsoleColor.Yellow)
-                    return True
-                else:
-                    continue
             else:
-                if excluded_control is not None:
-                    if top_window.AutomationId == excluded_control.searchProperties.get('AutomationId'): # 將原本起始的視窗排除避免無窮迴圈
+                if (top_window.AutomationId == pending_control.searchProperties.get('AutomationId')) or (top_window.Name == pending_control.searchProperties.get('Name')) or (pending_control.searchProperties.get('SubName', '!@#$') in top_window.Name): 
+                    if window_check_exist_enabled(top_window):
+                        auto.Logger.WriteLine(f"PENDING EXIST: (Name:{pending_control.Name}|AutomationId:{pending_control.AutomationId})", auto.ConsoleColor.Yellow)
+                        return True
+                    else:
                         continue
-                res = window_policy(top_window)
-                if res == False:
-                    continue
+                else:
+                    if excluded_control is not None:
+                        if top_window.AutomationId == excluded_control.searchProperties.get('AutomationId'): # 將excluded_control內視窗排除，可避免無窮迴圈
+                            continue
+                    res = window_policy(top_window)
+                    if res == False:
+                        continue
             retry = retry - 1
         except Exception as e:
             auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|Error Message: {e}", auto.ConsoleColor.Red)
@@ -585,23 +597,25 @@ def login(account: str, password: str, section_id: str, room_id: str):
     running, CONFIG['PROCESS_ID'] = process_exists(CONFIG['PROCESS_NAME'][0])
     if running is False:
         os.startfile(CONFIG['OPD_PATH'])
-        auto.Logger.WriteLine("OPD system started", auto.ConsoleColor.Yellow)
+        auto.Logger.WriteLine("OPD system starting..", auto.ConsoleColor.Yellow)
         while (running is False):
             running, CONFIG['PROCESS_ID'] = process_exists(CONFIG['PROCESS_NAME'][0])
             time.sleep(1)
+        auto.Logger.WriteLine("OPD system started", auto.ConsoleColor.Yellow)
     else:
         auto.Logger.WriteLine("OPD program is running", auto.ConsoleColor.Yellow)
     
-    while True:
-        window_top = window_dfs(CONFIG['PROCESS_ID'], only_one=True)
+    while True: # 找目前該process的top視窗
+        window_top = window_search_enabled(CONFIG['PROCESS_ID'])
         if window_top is not None:
             break
+        time.sleep(2)
     if window_top.AutomationId == "frmPatList":
         login_change_opd(account, password, section_id, room_id)
     else:
         # 等待進入病人清單主視窗
         window_main = auto.WindowControl(AutomationId="frmPatList", searchDepth=1)
-        window_pending(CONFIG['PROCESS_ID'], pending_control=window_main, retry=10)
+        window_pending(CONFIG['PROCESS_ID'], pending_control=window_main, retry=15)
         
 
 def login_all(account: str, password: str, section_id: str, room_id: str): # TODO 判斷登入是否成功的部份還沒移植出來，其他已更新
@@ -789,7 +803,7 @@ def main_ditto(hisno: str):
     # TODO 以下拆開成另一個函數? 這樣可以幫助追蹤進度?
     # 進到ditto視窗
     window_ditto = auto.WindowControl(searchDepth=1, AutomationId="frmDitto")
-    window_pending(CONFIG['PROCESS_ID'], pending_control=window_ditto, excluded_control=window_main) # FIXME
+    window_pending(CONFIG['PROCESS_ID'], pending_control=window_ditto, excluded_control=window_main, retry=10) # FIXME
 
     # 進去選擇最近的一次眼科紀錄010, 110, 0PH, 1PH, 0C1,...?
     c_datagrid_ditto = window_ditto.TableControl(Depth=3, AutomationId="dgvPatDtoList")
@@ -886,7 +900,55 @@ def package_open(index: int = -1, search_term: str = None):
         return False
 
 
-def package_iol_ovd(iol, ovd):
+def package_detail(order = None, drug = None, diagnosis = None):
+    '''
+    處理組套點擊後會有detail視窗
+    order, drug, diagnosis傳入參數為待搜尋字串，型態:list[str] 
+    '''
+    # 組套第二視窗:frmPkgDetail window
+    window_pkgdetail = auto.WindowControl(searchDepth=1, AutomationId="frmPkgDetail")
+    window_pkgdetail = window_search(window_pkgdetail)
+    if window_pkgdetail is None:
+        auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|NOT EXIST WINDOW ENTRY", auto.ConsoleColor.Red)
+        return False
+
+    choice_dict = {
+        "dgvPkgorder": order,
+        "dgvPkgdrug": drug,
+        "dgvPkgass": diagnosis
+    }
+
+    for automationid, search_items in choice_dict.items():
+        if search_items is not None:
+            if type(search_items) != list:
+                search_items = [search_items]
+            datagrid = window_pkgdetail.TableControl(searchDepth=1, AutomationId=automationid)
+            
+            # search_datagrid for target item
+            target_list = []
+            if datagrid.Exists():
+                target_list = datagrid_search(search_items, datagrid, only_one=False)
+                if len(target_list) < len(search_items):
+                    auto.Logger.WriteLine(f"{automationid}:LOSS OF RETURN!\nSEARCH_ITEMS:{search_items}", auto.ConsoleColor.Red)
+                    auto.Logger.WriteLine(f"TARGET_LIST: {[control.GetLegacyIAccessiblePattern().Value for control in target_list]}", auto.ConsoleColor.Red)
+            else:
+                auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|No datagrid dgvPkgorder", auto.ConsoleColor.Red)
+                return False
+    
+            # click_datagrid
+            residual_list = click_datagrid(datagrid, target_list=target_list)
+            if residual_list != True:
+                auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|Residual list:{residual_list}", auto.ConsoleColor.Red)
+            # 測試失敗紀錄: legacy.select
+            # c_datalist_pkgorder = c_datagrid_pkgorder.GetChildren()
+            # c_datalist_pkgorder[3].GetLegacyIAccessiblePattern().Select(8) # 無法被select不知道為何
+            # c_datalist_pkgorder[8].GetLegacyIAccessiblePattern().Select(8) # 無法被select不知道為何
+
+    # confirm
+    window_pkgdetail.ButtonControl(searchDepth=1, AutomationId="btnPkgDetailOK").GetInvokePattern().Invoke()
+
+
+def package_iol_ovd(iol, ovd): # TODO之後可被取代
     '''
     select IOL and OVD
     '''
@@ -923,7 +985,76 @@ def package_iol_ovd(iol, ovd):
     window_pkgdetail.ButtonControl(searchDepth=1, AutomationId="btnPkgDetailOK").GetInvokePattern().Invoke()
 
 
-def order_modify_side(side: str = None): 
+def order_modify(orders: list[dict], all=False): 
+    '''
+    能針對個別order做修改，也能一次更改
+    order = {
+        'name': 'anti-VEGF',
+        'site': 'R',
+        'charge': 'Y',
+        'number': '1',
+    }
+    若 all = True => 依照orders內資訊直接改全部
+    '''
+
+    window_soap = auto.WindowControl(searchDepth=1, AutomationId="frmSoap")
+    window_soap = window_search(window_soap)
+    if window_soap is None:
+        auto.Logger.WriteLine("No window frmSoap", auto.ConsoleColor.Red)
+        return False
+    # 修改order按鈕
+    window_soap.ButtonControl(searchDepth=1, AutomationId="btnSoapAlterOrder").GetInvokePattern().Invoke()  
+
+
+    # 進入修改window
+    window_alterord = auto.WindowControl(searchDepth=1, AutomationId="dlgAlterOrd")
+    window_alterord = window_search(window_alterord)
+    if window_alterord is None:
+        auto.Logger.WriteLine("No window dlgAlterOrd", auto.ConsoleColor.Red)
+        return False
+    
+    group = window_alterord.GroupControl(searchDepth=1, AutomationId="GroupBox1")
+    site = group.ComboBoxControl(searchDepth=1, AutomationId="cbxAlterOrdSpcnm")
+    charge = group.ComboBoxControl(searchDepth=1, AutomationId="cbxAlterOrdSelf")
+    number = group.ComboBoxControl(searchDepth=1, AutomationId="cbxAlterOrdQnty")
+    datagrid = window_alterord.TableControl(searchDepth=1, Name = 'DataGridView')
+
+    if all:
+        # 設定位置
+        if orders[0].get('site','') !='':
+            c_site = site.GetValuePattern().SetValue(orders[0]['site'])
+        # 設定數量
+        if orders[0].get('number','') !='':
+            c_number = number.GetValuePattern().SetValue(orders[0]['number'])
+        # 設定費用
+        if orders[0].get('charge','') !='':
+            c_charge = charge.GetValuePattern().SetValue(orders[0]['charge'])
+        # 按全選
+        click_retry(window_alterord.ButtonControl(searchDepth=1, AutomationId="btnAOrdSelectAll"))
+    for order in orders:
+        # 設定位置
+        if order.get('site','') !='':
+            c_site = site.GetValuePattern().SetValue(order['site'])
+        # 設定數量
+        if order.get('number','') !='':
+            c_number = number.GetValuePattern().SetValue(order['number'])
+        # 設定費用
+        if order.get('charge','') !='':
+            c_charge = charge.GetValuePattern().SetValue(order['charge'])
+        
+        target = datagrid_search(order['name'], datagrid)
+        click_datagrid(datagrid, target_list=target)
+
+    # 點擊確認 => 不能用Invoke，且上面選擇項目後的click不能改變focus，否則選擇項目會被自動取消
+    confirm = group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdOK")
+    click_blockinput(confirm)
+
+    # 點擊返回主畫面
+    group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdReturn").GetInvokePattern().Invoke()
+    return True
+
+
+def order_modify_side(side: str = None): # TODO之後可被取代
     # TODO 要能修改個別orders的側別和計價
     if side.strip().upper() == 'OD':
         side = 'R'
@@ -940,9 +1071,10 @@ def order_modify_side(side: str = None):
     if window_soap is None:
         auto.Logger.WriteLine("No window frmSoap", auto.ConsoleColor.Red)
         return False
-    
     # 修改order按鈕
     window_soap.ButtonControl(searchDepth=1, AutomationId="btnSoapAlterOrder").GetInvokePattern().Invoke()  
+
+
     # 進入修改window
     window_alterord = auto.WindowControl(searchDepth=1, AutomationId="dlgAlterOrd")
     window_alterord = window_search(window_alterord)
@@ -966,6 +1098,19 @@ def order_modify_side(side: str = None):
 
 
 def drug(drug_list):
+    '''
+    drug_list = [{
+        'name': '',
+        'charge': '',
+        'dose': '',
+        'frequency': '',
+        'route': '',
+        'duration': '',
+        'eyedrop': True,
+        'default': False,
+        'same_index': 0 # 若有藥名相同 => 此參數會=個數-1
+    },...]
+    '''
     window_soap = auto.WindowControl(searchDepth=1, AutomationId="frmSoap")
     window_soap = window_search(window_soap)
     if window_soap is None:
@@ -1307,15 +1452,15 @@ def diagnosis_cata(df_schedule, config_schedule, hisno, side, date):
     return diagnosis
 
 
-def diagnosis_ivi(df_selected_dict, config_schedule, date): # FIXME 尚未更新
+def diagnosis_ivi(df_selected_dict, config_schedule, date): # TODO 尚須修改
     diagnosis = 's/p IVI'
     if df_selected_dict[config_schedule['COL_CHARGE']].lower().find('(') > -1 :
         diagnosis = diagnosis + df_selected_dict[config_schedule['COL_CHARGE']] + ' '
     else:   
         diagnosis = diagnosis + df_selected_dict[config_schedule['COL_DRUGTYPE']].upper()[0]
         transform = {
-            'drug-free': 'c',
-            'all-free': 'f'
+            'Drug-Free': 'c',
+            'All-Free': 'f'
         }
         if df_selected_dict[config_schedule['COL_CHARGE']].lower() in transform.keys():
             diagnosis = diagnosis+ f"({transform.get(df_selected_dict[config_schedule['COL_CHARGE']].lower())}) "
@@ -1647,14 +1792,17 @@ def gsheet_drug_to_druglist(df: pandas.DataFrame, side: str):
     return drug_list
 
 
-def gsheet_drug(index: str, side: str):
+def gsheet_drug(index: str, side: str, ivi=False):
     '''
     Input: index ex: 4033
     Output: return drug list, which can be input to the select_precription
     '''
     df = gc.get_df(gsheet.GSHEET_SPREADSHEET, gsheet.GSHEET_WORKSHEET_DRUG)    
     
-    default = df.loc[df['INDEX'] == CONFIG['DEFAULT'],:]
+    if ivi:
+        default = df.loc[df['INDEX'] == 'ivi',:]
+    else:
+        default = df.loc[df['INDEX'] == CONFIG['DEFAULT'],:]
     
     index=str(index).lower() # case insensitive and compare in string format
     selector = (df['INDEX'].str.lower()==index) # case insensitive and compare in string format
@@ -1665,7 +1813,7 @@ def gsheet_drug(index: str, side: str):
         return gsheet_drug_to_druglist(selected_df, side)
 
 
-def gsheet_config_surgery(dr_code: str) -> dict:
+def gsheet_config_surgery(dr_code: str) -> dict: # TODO為何沒用到??
     '''
     取得set_surgery的資料, 回傳{column_name:value,...}
     value皆為字串形式
@@ -1746,7 +1894,7 @@ def gsheet_schedule_ivi(config_schedule):
     '''
     (IVI)依照config_schedule資訊取得對應的刀表內容且輸出讓使用者確認
     '''
-    auto.Logger.WriteLine(f"== INDEX:{config_schedule['INDEX']}|VS_CODE:{config_schedule['VS_CODE']}|SPREADSHEET:{config_schedule['SPREADSHEET']}|WORKSHEET:{config_schedule['WORKSHEET']} ==", auto.ConsoleColor.Yellow)
+    auto.Logger.WriteLine(f"== INDEX:{config_schedule['INDEX']}|SPREADSHEET:{config_schedule['SPREADSHEET']}|WORKSHEET:{config_schedule['WORKSHEET']} ==", auto.ConsoleColor.Yellow)
     while(1):
         df = gc.get_df_select(config_schedule['SPREADSHEET'], config_schedule['WORKSHEET'])
         print(df.reset_index()[[config_schedule['COL_HISNO'], config_schedule['COL_NAME'], config_schedule['COL_DIAGNOSIS'], config_schedule['COL_DRUGTYPE'], config_schedule['COL_CHARGE']]])
@@ -1858,19 +2006,142 @@ def search_opd_program(path_list, filename_list):
                 return result_list[0]
             
 
-def main_cata_1d():
-    pass
+def IVI_schedule_download(gclient, config, **kwargs):
+    '''
+    自動下載排程
+    '''
+    # 處理函數定義
+    def get_diagnosis(s):
+        check_list = ["AMD","PCV","RAP","mCNV","CRVO", "BRVO", "DME", "VH", "PDR", "NVG", "CME"]
+        final = ""
+        for i in check_list:
+            if s.find(i) > -1:
+                final = final + i + "+"
+        return final.strip("+")
 
-def main_cata_1w():
-    pass
+    def get_side(s):
+        if s.find("OD")>-1:
+            return "OD"
+        elif s.find("OS")>-1:
+            return "OS"
+        elif s.find("OU")>-1:
+            return "OU"
+        else:
+            return ""
 
-def main_cata_1m():
-    pass    
+    def get_drug(s):
+        final = ""
+
+        if (s.find("IVI-L") > -1) and (s.find("IVI-E") > -1):
+            final = final + "+Eylea"
+        if s.find("IVI-F") > -1:
+            final = final + "+Faricimab"
+        if s.find("IVI-B") > -1:
+            final = final + "+Beovu"
+        if s.find("IVI-A") > -1:
+            final = final + "+Avastin"
+        if s.find("IVI-L") > -1:
+            final = final + "+Lucentis"
+        if s.find("IVI-E") > -1:
+            final = final + "+Eylea"
+        if s.find("IVI-Ozu") > -1:
+            final = final + "+Ozurdex"
+        if s.find("STK") > -1:
+            final = final + "+STK"
+        if s.find("TPA") > -1:
+            final = final + "+TPA"
+        
+        return final.strip('+')
+
+    def get_charge(s):
+        if s.find("NHI") > -1:
+            return "NHI"
+        elif s.find("drug f") > -1:
+            return "Drug-Free"
+        elif s.find("all f") > -1:
+            return "All-Free"
+        elif s.find("SP-A") > -1:
+            return "SP-A"
+        elif s.find("SP-1") > -1:
+            return "SP-1"
+        elif s.find("SP-2") > -1:
+            return "SP-2"
+        elif (s.find("IVI-E") > -1) and (s.find("IVI-L") > -1):  #應該只有百哥在用?
+            return "L(E)"
+        else:
+            return ""
+    
+    ssheet = gclient.client.open(config['SPREADSHEET'])
+    wsheet = ssheet.worksheet_by_title(config['WORKSHEET'])
+
+    check = input("==>自動下載並更新IVI排程表單: (y:是，且會覆蓋原本BOT表單內容) | (n:否，維持BOT表單內容)")
+    if check.lower().strip() == 'y':
+        # 自動獲取排程
+        date = get_date_today(mode='民國')
+        vgh_client = vghbot_login.Client(TEST_MODE=TEST_MODE)
+        vgh_client.scheduler_login(**kwargs)
+        url = 'http://10.97.235.122/Exm/ExmQ010/ExmQ010_Read'
+        payload = {
+            'sort':'',
+            'group': '',
+            'filter': '',
+            'queryBeginDate': str(int(date[0:3])+1911)+date[3:],
+            'queryEndDate': str(int(date[0:3])+1911)+date[3:],
+            'scheduleID': 'CTOPHIVI',
+            'cancelYN': 'N',
+            'aheadScheduleYN': 'N',
+            'caseFrom': 'O',
+            'exmRoomID':'',
+            'schShiftNo':'',
+            'searchNRCode':'',
+            'SearchCriticalYN': 'N',
+            'SearchISOLYN': 'N'
+        }
+        res = vgh_client.session.post(url=url, data=payload)
+        res_json = json.loads(res.text)
+        res_df = pandas.DataFrame(res_json['Data'])
+        res_df = res_df[["PatNo", "PatNMC", "ScheduleName", "CreateID", "CreateName", "CombineSchExmItemName"]]
+        res_df.columns = [config['COL_HISNO'], config['COL_NAME'], '排程種類', '醫師登號', '醫師姓名', '排程內容']
+        
+        # 資料處理
+        res_df[config['COL_VS_CODE']] = res_df['醫師登號'].str[3:7]
+        res_df[config['COL_NAME']] = res_df[config['COL_NAME']].str.strip()
+        res_df[config['COL_DIAGNOSIS']] = res_df['排程內容'].apply(get_diagnosis)
+        res_df[config['COL_SIDE']] = res_df['排程內容'].apply(get_side)
+        res_df[config['COL_DRUGTYPE']] = res_df['排程內容'].apply(get_drug)
+        res_df[config['COL_CHARGE']] = res_df['排程內容'].apply(get_charge)
+        df_output = res_df[[config['COL_VS_CODE'],config['COL_NAME'],config['COL_HISNO'],config['COL_DIAGNOSIS'],config['COL_SIDE'],config['COL_DRUGTYPE'],config['COL_CHARGE']]]
+
+        # 自動更新BOT
+        wsheet.clear(start = 'A2')
+        wsheet.set_dataframe(df_output, 'A1', copy_index=False, nan='')
+
+    # 打開BOT讓使用者編輯
+    edge_path="C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+    webbrowser.register('edge', None, webbrowser.BackgroundBrowser(edge_path))
+    webbrowser.get('edge').open(wsheet.url)
+
+    # 且要有停頓讓使用者編輯完
+    while True:
+        check = input("==>等待BOT表單編輯完成: (y:是，已編輯完成)")
+        if check.lower().strip() == 'y':
+            return True
+
+
+# def main_cata_1d():
+#     pass
+
+# def main_cata_1w():
+#     pass
+
+# def main_cata_1m():
+#     pass    
 
 
 def main_cata():
     while True:
-        gc = gsheet.GsheetClient()
+        # gc = gsheet.GsheetClient() # FIXME 測試一下應該可以拿掉
+
         df = gc.get_df(gsheet.GSHEET_SPREADSHEET, gsheet.GSHEET_WORKSHEET_SURGERY) # 讀取config
         selected_col = ['INDEX','VS_CODE','SPREADSHEET','WORKSHEET']
         selected_df = df.loc[:, selected_col]
@@ -1929,6 +2200,10 @@ def main_cata():
                     res = main_ditto(hisno)
                     if res == False:
                         continue
+                    
+                    # 確認有進入frmSoap視窗 => 排除任何警告
+                    window_soap = auto.WindowControl(searchDepth=1, AutomationId="frmSoap")
+                    window_pending(CONFIG['PROCESS_ID'], pending_control=window_soap)
 
                     # 取得側別資訊
                     side = gsheet_schedule_side(df_schedule=df, config_schedule=config_schedule, hisno=hisno)
@@ -1962,7 +2237,9 @@ def main_cata():
                     else:
                         package_open(index=30)  # SP IOL
                     # IOL和OVD package設定
-                    package_iol_ovd(iol=iol_search_term, ovd=ovd)
+                    package_detail(order=[iol_search_term, ovd])
+                    # package_iol_ovd(iol=iol_search_term, ovd=ovd)
+
                     # 修改order的side
                     order_modify_side(side)
                     
@@ -1976,55 +2253,145 @@ def main_cata():
                     soap_save()
 
 
-def main_ivi(): # FIXME 函數尚未更新
-    # 輸入要操作OPD系統的帳密
+def main_ivi(): 
+    # 輸入要操作OPD系統的帳號
     dr_code = input("Please enter the short code of account (Ex:4123): ")
-    dr_code, login_id, login_psw = gsheet_acc(dr_code)
+    # 載入要操作OPD系統的帳密
+    login_id, login_psw = gsheet_acc(dr_code)
+    if login_id is None or login_psw is None:
+        login_id, login_psw = get_id_psw()
+        dr_code = login_id[3:7]
+    
+    # 選取IVI設定檔
+    df = gc.get_df(gsheet.GSHEET_SPREADSHEET, gsheet.GSHEET_WORKSHEET_IVI)
+    config_schedule = df.loc[(df.loc[:,'INDEX'].str.strip()==CONFIG['DEFAULT']),:].to_dict('records')[0] # IVI直接使用INDEX==DEFAULT_SYMBOL的組套
+    IVI_schedule_download(config=config_schedule, gclient=gc)
 
-    # 判斷程式運行與否
-    running, pid = process_exists(CONFIG['PROCESS_NAME'][0])
-
-    # 使用者輸入: 獲取刀表+日期模式
-    config_schedule = gsheet_config_ivi(0) # 使用共用組套
+    # 獲取刀表內容+日期模式
     date = get_date_today(config_schedule['OPD_DATE_MODE'])
     df = gsheet_schedule_ivi(config_schedule)
 
     # 開啟門診程式
-    if running:
-        auto.Logger.WriteLine("OPD program is running", auto.ConsoleColor.Yellow)
-        login_change_opd(login_id, login_psw, CONFIG['SECTION_PROCEDURE'][0], CONFIG['ROOM_PROCEDURE'][0]) 
-    else:
-        login_all(CONFIG['OPD_PATH'],login_id, login_psw, CONFIG['SECTION_PROCEDURE'][0], CONFIG['ROOM_PROCEDURE'][0])
+    login(login_id, login_psw, CONFIG['SECTION_PROCEDURE'][0], CONFIG['ROOM_PROCEDURE'][0])
 
     # 將所有病歷號加入非常態掛號
     hisno_list = df[config_schedule['COL_HISNO']].to_list()
     main_appointment(hisno_list)
-
+    
+    # 取得已有暫存list => 之後處理部分會跳過
+    exclude_hisno_list = main_excluded_hisno_list(hisno_list)
+    if len(exclude_hisno_list) > 0:
+        choice = input("跳過已暫存資料(Enter:是|n:否): ")
+        if choice.strip().lower() != '':
+            exclude_hisno_list = []
+    
     # 逐一病人處理
     df.set_index(keys=config_schedule['COL_HISNO'], inplace=True)
     for hisno in hisno_list:
-        # ditto
-        main_ditto(hisno)
+        # 跳過已有暫存者
+        if hisno in exclude_hisno_list:
+            auto.Logger.WriteLine(f"Already saved: {hisno}", auto.ConsoleColor.Yellow)
+            continue
         
-        side = df.loc[hisno, config_schedule['COL_SIDE']].strip()
-        charge = df.loc[hisno, config_schedule['COL_CHARGE']].strip()
-        drug_ivi = df.loc[hisno, config_schedule['COL_DRUGTYPE']].strip()
-        # TODO
-        # TODO 要依照charge處理order
-        # TODO 要依照charge決定drug_ivi要不要開上去
-        # TODO 依照charge決定出單方式? => 兩次出單
+        # 第一次ditto
+        res = main_ditto(hisno)
+        if res == False:
+            continue
 
-        
-        # 處理其它藥物
-        other_drug_list = gsheet_drug('ivi')
-        drug(other_drug_list)
+        # 確認有進入frmSoap視窗 => 排除任何警告
+        window_soap = auto.WindowControl(searchDepth=1, AutomationId="frmSoap")
+        window_pending(CONFIG['PROCESS_ID'], pending_control=window_soap)
+
+        # 取得側別資訊
+        side = gsheet_schedule_side(df_schedule=df, config_schedule=config_schedule, hisno=hisno)
 
         # 在Subject框內輸入手術資訊 => 要先組合手術資訊
         diagnosis = diagnosis_ivi(df.loc[[hisno], :].to_dict('records')[0], config_schedule, date)
         set_S(diagnosis)
 
-        # 暫存退出
-        soap_save()
+        # 眼藥水藥物
+        drug_list = gsheet_drug(f'ivi_{dr_code}', side)
+        drug(drug_list)
+
+        # 輔助轉換函數
+        transform_side_to_site = {
+            'OD': 'R',
+            'OS': 'L',
+            'OU': 'B',
+        }
+
+        # orders修改範例
+        orders_selfpaid = [{
+            'name': 'anti-VEGF',
+            'site': transform_side_to_site[side],
+            'charge': 'Y',
+        }]
+
+        # 多種藥物目前採取人工處理
+        if '+' in df.loc[hisno, config_schedule['COL_DRUGTYPE']].strip(): 
+            soap_save()
+            continue
+        
+        # 依照charge決定出單方式
+        if df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'NHI'.upper(): # NHI
+            package_open(search_term='IVI')
+            package_detail(order=['anti-VEGF'])
+        elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-1'.upper():
+            package_open(search_term='IVI')
+            package_detail(order=['anti-VEGF'])
+            order_modify(orders=orders_selfpaid)
+        elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-2'.upper():
+            pass
+        elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-A'.upper():
+            package_open(search_term='IVI')
+            package_detail(order=['AVASTIN'])
+        elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'Drug-Free'.upper():
+            package_open(search_term='IVI')
+            package_detail(order=['anti-VEGF'])
+            order_modify(orders=orders_selfpaid)
+        elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'All-free'.upper():
+            # 直接出單
+            pass
+        else:
+            auto.Logger.WriteLine(f"UNKNOWN CHARGE TYPE", auto.ConsoleColor.Red)
+        
+        soap_save() # FIXME 下面功能完成就可以去掉
+        # # TODO 出單
+
+        # if (df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'NHI'.upper()) or (df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-1'.upper()) or (df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-2'.upper()):
+
+        #     # 第二次ditto # TODO 考慮改成retrieve比較快?
+        #     res = main_ditto(hisno)
+        #     if res == False:
+        #         continue
+
+        #     # 輔助轉換函數
+        #     transform_side_to_route = {
+        #         'OD': 'IED',
+        #         'OS': 'IES',
+        #         'OU': 'IEU',
+        #     }
+        #     # 處理anti-VEGF藥物
+        #     antiVEGF = [{
+        #         'name': df.loc[hisno, config_schedule['COL_DRUGTYPE']].strip(),
+        #         'charge': '',
+        #         'dose': '',
+        #         'frequency': 'STAT',
+        #         'route': transform_side_to_route[side],
+        #         'duration': '',
+        #         'eyedrop': True,
+        #         'default': False,
+        #         'same_index': 0
+        #     }]
+        #     if df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'NHI'.upper():
+        #         drug_add(antiVEGF)
+        #         drug_modify(antiVEGF)
+        #     elif (df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-1'.upper()) or (df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-2'.upper()):
+        #         antiVEGF['charge'] = 'Y'
+        #         drug_add(antiVEGF)
+        #         drug_modify(antiVEGF)
+            
+        #     # TODO 出單
 
 
 def main():
@@ -2043,17 +2410,17 @@ def main():
             
 
 
-TEST_MODE = False
 CONFIG = {}
 
 UPDATER_OWNER = 'zmh00'
 UPDATER_REPO = 'vghbot_opd'
 UPDATER_FILENAME = 'opd'
-UPDATER_VERSION_TAG = 'v1.1'
+UPDATER_VERSION_TAG = 'v1.3'
 
 gc = gsheet.GsheetClient()
 CONFIG.update(gc.get_col_dict(gsheet.GSHEET_SPREADSHEET, gsheet.GSHEET_WORKSHEET_CONFIG))
 CONFIG['DEFAULT'] = CONFIG['DEFAULT'][0]
+TEST_MODE = bool(int(CONFIG['TEST_MODE'][0]))
 if TEST_MODE == True:
     CONFIG['ROOM_CATA'][0] = str(int(CONFIG['ROOM_CATA'][0])+1)
 
