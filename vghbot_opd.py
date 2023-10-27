@@ -2334,19 +2334,19 @@ def main_ivi():
         
         # 依照charge決定出單方式
         if df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'NHI'.upper(): # NHI
-            package_open(search_term='IVI')
+            package_open(search_term='IVI-L/E/Ozu/shincort')
             package_detail(order=['anti-VEGF'])
         elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-1'.upper():
-            package_open(search_term='IVI')
+            package_open(search_term='IVI-L/E/Ozu/shincort')
             package_detail(order=['anti-VEGF'])
             order_modify(orders=orders_selfpaid)
         elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-2'.upper():
             pass
         elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-A'.upper():
-            package_open(search_term='IVI')
+            package_open(search_term='IVI-L/E/Ozu/shincort')
             package_detail(order=['AVASTIN'])
         elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'Drug-Free'.upper():
-            package_open(search_term='IVI')
+            package_open(search_term='IVI-L/E/Ozu/shincort')
             package_detail(order=['anti-VEGF'])
             order_modify(orders=orders_selfpaid)
         elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'All-free'.upper():
