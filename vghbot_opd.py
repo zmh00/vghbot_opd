@@ -830,7 +830,9 @@ def main_ditto(hisno: str):
         c_check_a.GetTogglePattern().Toggle()
         c_check_p = window_ditto.CheckBoxControl(searchDepth=1, AutomationId="Check_P")
         c_check_p.GetTogglePattern().Toggle()
-        window_ditto.ButtonControl(searchDepth=1, AutomationId="btnSelect").GetInvokePattern().Invoke()
+        
+        button = window_ditto.ButtonControl(searchDepth=1, AutomationId="btnSelect") # 出現肝病通知時這邊好像會被卡住 => 改成用click
+        click_retry(button)
     else:
         auto.Logger.WriteLine("txtSOAP_S is empty!", auto.ConsoleColor.Red)
 
@@ -1046,8 +1048,8 @@ def order_modify(orders: list[dict], all=False):
         click_datagrid(datagrid, target_list=target)
 
     # 點擊確認 => 不能用Invoke，且上面選擇項目後的click不能改變focus，否則選擇項目會被自動取消
-    confirm = group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdOK")
-    click_blockinput(confirm)
+    confirm = group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdOK") 
+    click_blockinput(confirm) # FIXME 這邊點擊不到??
 
     # 點擊返回主畫面
     group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdReturn").GetInvokePattern().Invoke()
