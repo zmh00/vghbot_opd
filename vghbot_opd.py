@@ -2367,6 +2367,10 @@ def main_ivi():
             if res == False:
                 continue
 
+            # 確認有進入frmSoap視窗 => 排除任何警告
+            window_soap = auto.WindowControl(searchDepth=1, AutomationId="frmSoap")
+            window_pending(CONFIG['PROCESS_ID'], pending_control=window_soap)
+
             # 處理anti-VEGF藥物
             antiVEGF = [{
                 'name': df.loc[hisno, config_schedule['COL_DRUGTYPE']].strip(),
@@ -2393,6 +2397,10 @@ def main_ivi():
             res = main_ditto(hisno) # TODO 考慮改成retrieve比較快?
             if res == False:
                 continue
+            
+            # 確認有進入frmSoap視窗 => 排除任何警告
+            window_soap = auto.WindowControl(searchDepth=1, AutomationId="frmSoap")
+            window_pending(CONFIG['PROCESS_ID'], pending_control=window_soap)
 
             # 處理anti-VEGF藥物
             antiVEGF = [{
