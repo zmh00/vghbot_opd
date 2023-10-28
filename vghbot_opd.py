@@ -174,11 +174,19 @@ def window_policy(control: auto.WindowControl):
                     control.ButtonControl(Depth=2, AutomationId="btnOK").GetInvokePattern().Invoke()
                 else:
                     return False
+            elif control.AutomationId == "dlgICDReply": # 修改ICD側別
+                if window_check_exist_enabled(control):
+                    control.GetWindowPattern().Close()
+                    # TODO 好像還有操作?
+                else:
+                    return False
+
             # elif control.AutomationId == "##########": # 複製用樣板
             #     if window_check_exist_enabled(control):
             #         control.GetWindowPattern().Close()
             #     else:
             #         return False
+
             else: # 未登錄AutomationId視窗
                 auto.Logger.WriteLine(f"TopWindow (Name:{control.Name}|AutomationId:{control.AutomationId}) => No available policy (Unknown AutomationId)")
                 captureimage(postfix=inspect.currentframe().f_code.co_name)
@@ -202,6 +210,21 @@ def window_policy(control: auto.WindowControl):
             if window_check_exist_enabled(control):
                 if control.TextControl(searchDepth=1, SubName="卡機重新連線").Exists(): # 登入前卡機重新連線警告
                     button = control.ButtonControl(searchDepth=1, SubName="略過")
+                    button.GetInvokePattern().Invoke()
+                else:
+                    text = control.TextControl(searchDepth=1)
+                    if text.Exists():
+                        auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|未知訊息視窗:{text.Name}", auto.ConsoleColor.Yellow)
+                    else:
+                        auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|未知訊息視窗", auto.ConsoleColor.Yellow)
+                        captureimage(postfix=inspect.currentframe().f_code.co_name)
+                    control.GetWindowPattern().Close()
+            else:
+                return False
+        elif control.Name == "錯誤訊息":
+            if window_check_exist_enabled(control):
+                if control.TextControl(searchDepth=1, SubName="讀卡機timeout").Exists(): # 解決讀卡機timeout的錯誤訊息
+                    button = control.ButtonControl(searchDepth=1, Name="確定")
                     button.GetInvokePattern().Invoke()
                 else:
                     text = control.TextControl(searchDepth=1)
@@ -508,10 +531,11 @@ def click_retry(control, topwindow = None, retry=5, doubleclick=False):
     return False # 如果沒有成功點擊返回即return False
 
 
-def click_datagrid(datagrid, target_list:list, doubleclick=False):
+def click_datagrid(datagrid, target_list:list, doubleclick=False, setfocus=True):
     '''
     能在datagrid中點擊項目並使用scroll button
     成功完成回傳True, 失敗會回傳沒有點到的target_list
+    ** setfocus = Trus: 正常是怕視窗跑掉，但當modify藥物和orders時如果setfocus會讓已選擇的項目消失，所以該狀況不能setfocus
     '''
     if len(target_list) == 0: # target_list is empty
         return True
@@ -544,7 +568,8 @@ def click_datagrid(datagrid, target_list:list, doubleclick=False):
                                 auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|CLICKING POSITION OUTSIDE OF THE SCROLLABLE AREA: {t.Name}", auto.ConsoleColor.Red)
                                 auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|XCENTER: {t_xcenter}, YCENTER: {t_ycenter}, CLICKABLE_RIGHT: {clickable_right}, CLICKABLE_BOTTOM: {clickable_bottom}", auto.ConsoleColor.Red)
                             continue
-                        t.SetFocus()
+                        if setfocus: # 這目的是modify藥物和orders時如果setfocus會讓已選擇的項目消失
+                            t.SetFocus()
                         if click_blockinput(t, doubleclick=doubleclick): # TODO 這只能確定正常點擊，但物件是否正確成為選擇狀態未知
                             remaining_target_list.remove(t)
             if len(remaining_target_list) == 0: # remaining_target_list is empty
@@ -559,7 +584,8 @@ def click_datagrid(datagrid, target_list:list, doubleclick=False):
     else:
         auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|NOT EXIST: scroll button")
         for t in target_list:
-            t.SetFocus()
+            if setfocus: # 這目的是modify藥物和orders時如果setfocus會讓已選擇的項目消失
+                t.SetFocus()
             if click_blockinput(t, doubleclick=doubleclick):
                 time.sleep(0.3)
                 remaining_target_list.remove(t)
@@ -950,41 +976,41 @@ def package_detail(order = None, drug = None, diagnosis = None):
     window_pkgdetail.ButtonControl(searchDepth=1, AutomationId="btnPkgDetailOK").GetInvokePattern().Invoke()
 
 
-def package_iol_ovd(iol, ovd): # TODO之後可被取代
-    '''
-    select IOL and OVD
-    '''
-    # 組套第二視窗:frmPkgDetail window
-    window_pkgdetail = auto.WindowControl(searchDepth=1, AutomationId="frmPkgDetail")
-    window_pkgdetail = window_search(window_pkgdetail)
-    if window_pkgdetail is None:
-        auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|NOT EXIST WINDOW ENTRY", auto.ConsoleColor.Red)
-        return False
+# def package_iol_ovd(iol, ovd): # TODO之後可被取代
+#     '''
+#     select IOL and OVD
+#     '''
+#     # 組套第二視窗:frmPkgDetail window
+#     window_pkgdetail = auto.WindowControl(searchDepth=1, AutomationId="frmPkgDetail")
+#     window_pkgdetail = window_search(window_pkgdetail)
+#     if window_pkgdetail is None:
+#         auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|NOT EXIST WINDOW ENTRY", auto.ConsoleColor.Red)
+#         return False
     
-    c_datagrid_pkgorder = window_pkgdetail.TableControl(searchDepth=1, AutomationId="dgvPkgorder")
+#     c_datagrid_pkgorder = window_pkgdetail.TableControl(searchDepth=1, AutomationId="dgvPkgorder")
     
-    # search_datagrid for target item
-    target_list = []
-    if c_datagrid_pkgorder.Exists():
-        target_list = datagrid_search([iol, ovd], c_datagrid_pkgorder, only_one=False)
-        if len(target_list) < 2:
-            auto.Logger.WriteLine(f"LOSS OF RETURN: IOL:{iol}|OVD:{ovd}", auto.ConsoleColor.Red)
-            auto.Logger.WriteLine(f"target_list: {[control.GetLegacyIAccessiblePattern().Value for control in target_list]}", auto.ConsoleColor.Red)
-    else:
-        auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|No datagrid dgvPkgorder", auto.ConsoleColor.Red)
-        return False
+#     # search_datagrid for target item
+#     target_list = []
+#     if c_datagrid_pkgorder.Exists():
+#         target_list = datagrid_search([iol, ovd], c_datagrid_pkgorder, only_one=False)
+#         if len(target_list) < 2:
+#             auto.Logger.WriteLine(f"LOSS OF RETURN: IOL:{iol}|OVD:{ovd}", auto.ConsoleColor.Red)
+#             auto.Logger.WriteLine(f"target_list: {[control.GetLegacyIAccessiblePattern().Value for control in target_list]}", auto.ConsoleColor.Red)
+#     else:
+#         auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|No datagrid dgvPkgorder", auto.ConsoleColor.Red)
+#         return False
     
-    # click_datagrid
-    residual_list = click_datagrid(c_datagrid_pkgorder, target_list=target_list)
-    if residual_list != True:
-        auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|Residual list:{residual_list}", auto.ConsoleColor.Red)
-    # 測試失敗紀錄: legacy.select
-    # c_datalist_pkgorder = c_datagrid_pkgorder.GetChildren()
-    # c_datalist_pkgorder[3].GetLegacyIAccessiblePattern().Select(8) # 無法被select不知道為何
-    # c_datalist_pkgorder[8].GetLegacyIAccessiblePattern().Select(8) # 無法被select不知道為何
+#     # click_datagrid
+#     residual_list = click_datagrid(c_datagrid_pkgorder, target_list=target_list)
+#     if residual_list != True:
+#         auto.Logger.WriteLine(f"{inspect.currentframe().f_code.co_name}|Residual list:{residual_list}", auto.ConsoleColor.Red)
+#     # 測試失敗紀錄: legacy.select
+#     # c_datalist_pkgorder = c_datagrid_pkgorder.GetChildren()
+#     # c_datalist_pkgorder[3].GetLegacyIAccessiblePattern().Select(8) # 無法被select不知道為何
+#     # c_datalist_pkgorder[8].GetLegacyIAccessiblePattern().Select(8) # 無法被select不知道為何
 
-    # confirm
-    window_pkgdetail.ButtonControl(searchDepth=1, AutomationId="btnPkgDetailOK").GetInvokePattern().Invoke()
+#     # confirm
+#     window_pkgdetail.ButtonControl(searchDepth=1, AutomationId="btnPkgDetailOK").GetInvokePattern().Invoke()
 
 
 def order_modify(orders: list[dict], all=False): 
@@ -1044,59 +1070,58 @@ def order_modify(orders: list[dict], all=False):
         if order.get('charge','') !='':
             c_charge = charge.GetValuePattern().SetValue(order['charge'])
         
-        target = datagrid_search(order['name'], datagrid)
-        click_datagrid(datagrid, target_list=target)
+        target_list = datagrid_search(order['name'], datagrid, only_one=True)
+        click_blockinput(target_list[0]) # click_datagrid(datagrid, target_list=target_list, setfocus=False) # 這是正確方式，但當order或藥物不會超過一頁需要使用scroll button時，可以直接click來加速
 
     # 點擊確認 => 不能用Invoke，且上面選擇項目後的click不能改變focus，否則選擇項目會被自動取消
-    confirm = group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdOK") 
-    click_blockinput(confirm) # FIXME 這邊點擊不到??
+    click_blockinput(group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdOK")) 
 
     # 點擊返回主畫面
     group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdReturn").GetInvokePattern().Invoke()
     return True
 
 
-def order_modify_side(side: str = None): # TODO之後可被取代
-    # TODO 要能修改個別orders的側別和計價
-    if side.strip().upper() == 'OD':
-        side = 'R'
-    elif side.strip().upper() == 'OS':
-        side = 'L'
-    elif side.strip().upper() == 'OU':
-        side = 'B'
-    else:
-        auto.Logger.WriteLine("UNKNOWN INPUT OF ORDER SIDE", auto.ConsoleColor.Red)
-        return
+# def order_modify_side(side: str = None): # TODO之後可被取代
+#     # TODO 要能修改個別orders的側別和計價
+#     if side.strip().upper() == 'OD':
+#         side = 'R'
+#     elif side.strip().upper() == 'OS':
+#         side = 'L'
+#     elif side.strip().upper() == 'OU':
+#         side = 'B'
+#     else:
+#         auto.Logger.WriteLine("UNKNOWN INPUT OF ORDER SIDE", auto.ConsoleColor.Red)
+#         return
 
-    window_soap = auto.WindowControl(searchDepth=1, AutomationId="frmSoap")
-    window_soap = window_search(window_soap)
-    if window_soap is None:
-        auto.Logger.WriteLine("No window frmSoap", auto.ConsoleColor.Red)
-        return False
-    # 修改order按鈕
-    window_soap.ButtonControl(searchDepth=1, AutomationId="btnSoapAlterOrder").GetInvokePattern().Invoke()  
+#     window_soap = auto.WindowControl(searchDepth=1, AutomationId="frmSoap")
+#     window_soap = window_search(window_soap)
+#     if window_soap is None:
+#         auto.Logger.WriteLine("No window frmSoap", auto.ConsoleColor.Red)
+#         return False
+#     # 修改order按鈕
+#     window_soap.ButtonControl(searchDepth=1, AutomationId="btnSoapAlterOrder").GetInvokePattern().Invoke()  
 
 
-    # 進入修改window
-    window_alterord = auto.WindowControl(searchDepth=1, AutomationId="dlgAlterOrd")
-    window_alterord = window_search(window_alterord)
+#     # 進入修改window
+#     window_alterord = auto.WindowControl(searchDepth=1, AutomationId="dlgAlterOrd")
+#     window_alterord = window_search(window_alterord)
     
-    # 在一個group下修改combobox
-    group = window_alterord.GroupControl(searchDepth=1, AutomationId="GroupBox1")
-    c_side = group.ComboBoxControl(searchDepth=1, AutomationId="cbxAlterOrdSpcnm").GetValuePattern().SetValue(side)
+#     # 在一個group下修改combobox
+#     group = window_alterord.GroupControl(searchDepth=1, AutomationId="GroupBox1")
+#     c_side = group.ComboBoxControl(searchDepth=1, AutomationId="cbxAlterOrdSpcnm").GetValuePattern().SetValue(side)
 
-    # 按全選
-    click_retry(window_alterord.ButtonControl(searchDepth=1, AutomationId="btnAOrdSelectAll"))
+#     # 按全選
+#     click_retry(window_alterord.ButtonControl(searchDepth=1, AutomationId="btnAOrdSelectAll"))
 
-    # 點擊確認 => 不能用Invoke，且上面選擇項目後的click不能改變focus，否則選擇項目會被自動取消
-    confirm = group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdOK")
-    click_blockinput(confirm)
-    # confirm.GetInvokePattern().Invoke() 
-    # click_retry(confirm)
+#     # 點擊確認 => 不能用Invoke，且上面選擇項目後的click不能改變focus，否則選擇項目會被自動取消
+#     confirm = group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdOK")
+#     click_blockinput(confirm)
+#     # confirm.GetInvokePattern().Invoke() => 無法
+#     # click_retry(confirm) => 無法(設計內含setfocus)
 
-    # 點擊返回主畫面
-    group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdReturn").GetInvokePattern().Invoke()
-    return True
+#     # 點擊返回主畫面
+#     group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdReturn").GetInvokePattern().Invoke()
+#     return True
 
 
 def drug(drug_list):
@@ -1252,7 +1277,7 @@ def drug_delete(drug_list = [], deleted_drug_list = []):
             click_blockinput(deleted_item)
             if TEST_MODE:
                 print(deleted_item.Name)
-        # click_datagrid(datagrid, deleted_list) # FIXME 無法選擇需要刪除的項目 => 會出現資料列 -1
+        # click_datagrid(datagrid, deleted_list) # 無法選擇需要刪除的項目 => 會出現資料列 -1 => 因為click_datagrid原先設計會重新set focus => 可以使用setfocus=False
         # 點擊刪除
         click_blockinput(window_altermed.ButtonControl(searchDepth=1, AutomationId="btnDelete"))
         # window_altermed.ButtonControl(searchDepth=1, AutomationId="btnDelete").GetInvokePattern().Invoke() => 應該會失效
@@ -1276,7 +1301,8 @@ def drug_modify(drug_list):
                 continue
 
             c_modify = window_altermed.TabControl(searchDepth=1, AutomationId="TabControl1").PaneControl(searchDepth=1, AutomationId="TabPage1")
-            # c_charge = c_modify.ListControl(searchDepth=1, AutomationId="ListBoxType").ListItemControl(SubName = "自購").GetSelectionItemPattern().Select() #FIXME 目前這樣使用會出錯，不知為何
+            if drug['charge'] == 'S':
+                click_blockinput(c_modify.ListControl(searchDepth=1, AutomationId="ListBoxType").ListItemControl(SubName = "自購")) #FIXME 需要測試
             if drug['dose'] != '':
                 c_dose = c_modify.ComboBoxControl(searchDepth=1, AutomationId="ComboDose").GetValuePattern().SetValue(drug['dose'])
             if drug['frequency'] != '':
@@ -1288,7 +1314,7 @@ def drug_modify(drug_list):
             if (drug['dose'] != '') or (drug['frequency'] != '') or (drug['route'] != '') or (drug['duration'] != ''):
                 c_datagrid = window_altermed.TableControl(searchDepth=1, Name="DataGridView")
                 target_list = datagrid_search(drug['name'], c_datagrid, skip=drug['same_index'], only_one=True)
-                click_blockinput(target_list[0])
+                click_blockinput(target_list[0]) # click_datagrid(datagrid, target_list=target_list, setfocus=False) # 這是正確方式，但當order或藥物不會超過一頁需要使用scroll button時，可以直接click來加速
                 click_blockinput(window_altermed.ButtonControl(searchDepth=1, AutomationId="btnModify"))
         # 只要對修改數據有任何input，選擇的datagrid就會跳成-1
         # 目前測試資料框使用setvalue或sendkey都可，但選擇藥物和送出都必須使用click()，流程必須是先設定好要更改的資料，再refind datagrid，然後點藥和送出都必須是click()
@@ -1298,7 +1324,7 @@ def drug_modify(drug_list):
         return False
 
 
-def select_ivi(charge): # TODO
+def select_ivi(charge): # TODO 尚未完成，處理榮民身分
     charge = charge.upper()
     if charge == 'SP-A':
         data = get_patient_data()
@@ -1603,16 +1629,21 @@ def procedure_button_old(mode='ivi'):
         t = datagrid_search('3E0C3GC', datagrid)
         click_datagrid(datagrid, t)
     elif mode == 'phaco':
-        pass # TODO 要處理側別
+        pass # TODO 要處理側別'OD'
     
 
 def soap_confirm(mode=0):
     '''
-    # TODO 目前這功能是給沒插卡的IVI出單用
+    # 目前這功能是給沒插卡的IVI出單用
     mode=0:直接不印病歷貼單送出
     mode=1:檢視帳單
     mode=2:檢視帳單後送出
     '''
+
+    if TEST_MODE:
+        soap_save()
+        return
+
     window_soap = auto.WindowControl(searchDepth=1, AutomationId="frmSoap")
     window_soap = window_search(window_soap)
     if window_soap is None:
@@ -1623,41 +1654,38 @@ def soap_confirm(mode=0):
     # button.GetInvokePattern().Invoke() # 需要改成click
     click_retry(button)
 
-    # 處理ICD換左右邊診斷視窗
-    window = auto.WindowControl(searchDepth=2, AutomationId="dlgICDReply")
-    window.GetWindowPattern().Close()
-    window = window_search(window,3)
-    button = window.ButtonControl(searchDepth=1, AutomationId="btnCancel")
-    click_retry(button)
-    
-    # 解決讀卡機timeout的錯誤訊息
-    window = auto.WindowControl(searchDepth=2, Name="錯誤訊息")
-    window = window_search(window)
-    if window is None:
-        return
-    button = window.ButtonControl(searchDepth=1, Name="確定")
-    click_retry(button)
+    # TODO 重複用藥、慢簽用藥警告
+
+    # # 處理ICD換左右邊診斷視窗
+    # window = auto.WindowControl(searchDepth=2, AutomationId="dlgICDReply")
+    # window.GetWindowPattern().Close()
+    # window = window_search(window,3)
+    # button = window.ButtonControl(searchDepth=1, AutomationId="btnCancel")
+    # click_retry(button)
+
+    # 等繳費視窗出現
+    window_pay = auto.WindowControl(searchDepth=2, AutomationId="dlgNhiPpay")
+    window_pending(CONFIG['PROCESS_ID'], pending_control=window_pay)
 
     # 處理繳費視窗
-    window = auto.WindowControl(searchDepth=2, AutomationId="dlgNhiPpay")
-    window = window_search(window)
+    window_pay = window_search(window_pay)
     if mode == 0:
         # 送出(不印病歷)
-        pane = window.PaneControl(searchDepth=1, AutomationId="btnBillViewOK")
+        pane = window_pay.PaneControl(searchDepth=1, AutomationId="btnBillViewOK")
         button = pane.ButtonControl(searchDepth=1, AutomationId="Button1")
         click_retry(button)
     elif mode == 1:
         # 檢視帳單
-        button = window.ButtonControl(searchDepth=1, AutomationId="btnNhiPpayOK")
+        button = window_pay.ButtonControl(searchDepth=1, AutomationId="btnNhiPpayOK")
         click_retry(button)
     elif mode == 2:
         # 檢視帳單
-        button = window.ButtonControl(searchDepth=1, AutomationId="btnNhiPpayOK")
+        button = window_pay.ButtonControl(searchDepth=1, AutomationId="btnNhiPpayOK")
         click_retry(button)
         # 檢視帳單後送出
-        window = auto.WindowControl(searchDepth=2, AutomationId="frmBillView")
-        window = window_search(window)
-        pane = window.PaneControl(searchDepth=1, AutomationId="btnBillViewOK")
+        window_pay = auto.WindowControl(searchDepth=2, AutomationId="frmBillView")
+        window_pay = window_search(window_pay)
+        pane = window_pay.PaneControl(searchDepth=1, AutomationId="btnBillViewOK")
         button = pane.ButtonControl(searchDepth=1, AutomationId="Button1")
         click_retry(button)
 
@@ -2142,8 +2170,6 @@ def IVI_schedule_download(gclient, config, **kwargs):
 
 def main_cata():
     while True:
-        # gc = gsheet.GsheetClient() # FIXME 測試一下應該可以拿掉
-
         df = gc.get_df(gsheet.GSHEET_SPREADSHEET, gsheet.GSHEET_WORKSHEET_SURGERY) # 讀取config
         selected_col = ['INDEX','VS_CODE','SPREADSHEET','WORKSHEET']
         selected_df = df.loc[:, selected_col]
@@ -2243,7 +2269,10 @@ def main_cata():
                     # package_iol_ovd(iol=iol_search_term, ovd=ovd)
 
                     # 修改order的side
-                    order_modify_side(side)
+                    order = [{
+                        'site': transform_side_to_site(side),
+                    }]
+                    order_modify(order, all=True)
                     
                     # 處理藥物
                     drug_list = gsheet_drug(dr_code, side)
@@ -2315,17 +2344,10 @@ def main_ivi():
         drug_list = gsheet_drug(f'ivi_{dr_code}', side)
         drug(drug_list)
 
-        # 輔助轉換函數
-        transform_side_to_site = {
-            'OD': 'R',
-            'OS': 'L',
-            'OU': 'B',
-        }
-
         # orders修改範例
         orders_selfpaid = [{
             'name': 'anti-VEGF',
-            'site': transform_side_to_site[side],
+            'site': transform_side_to_site(side),
             'charge': 'Y',
         }]
 
@@ -2338,62 +2360,110 @@ def main_ivi():
         if df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'NHI'.upper(): # NHI
             package_open(search_term='IVI-L/E/Ozu/shincort')
             package_detail(order=['anti-VEGF'])
+            soap_confirm()
+            
+            # aVEGF藥
+            res = main_ditto(hisno) # TODO 考慮改成retrieve比較快?
+            if res == False:
+                continue
+
+            # 處理anti-VEGF藥物
+            antiVEGF = [{
+                'name': df.loc[hisno, config_schedule['COL_DRUGTYPE']].strip(),
+                'charge': '',
+                'dose': '',
+                'frequency': 'STAT',
+                'route': transform_side_to_route(side),
+                'duration': '',
+                'eyedrop': True,
+                'default': False,
+                'same_index': 0
+            }]
+            drug_add(antiVEGF)
+            drug_modify(antiVEGF)
+            soap_confirm()
+
         elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-1'.upper():
             package_open(search_term='IVI-L/E/Ozu/shincort')
             package_detail(order=['anti-VEGF'])
             order_modify(orders=orders_selfpaid)
+            soap_confirm()
+            
+            # aVEGF藥 
+            res = main_ditto(hisno) # TODO 考慮改成retrieve比較快?
+            if res == False:
+                continue
+
+            # 處理anti-VEGF藥物
+            antiVEGF = [{
+                'name': df.loc[hisno, config_schedule['COL_DRUGTYPE']].strip(),
+                'charge': '',
+                'dose': '',
+                'frequency': 'STAT',
+                'route': transform_side_to_route(side),
+                'duration': '',
+                'eyedrop': True,
+                'default': False,
+                'same_index': 0
+            }]
+            
+            antiVEGF['charge'] = 'S'
+            drug_add(antiVEGF)
+            drug_modify(antiVEGF)
+            soap_confirm()
+
         elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-2'.upper():
-            pass
+            soap_save()
         elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-A'.upper():
             package_open(search_term='IVI-L/E/Ozu/shincort')
             package_detail(order=['AVASTIN'])
+            soap_save() # TODO 應該要分榮民與否?
         elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'Drug-Free'.upper():
             package_open(search_term='IVI-L/E/Ozu/shincort')
             package_detail(order=['anti-VEGF'])
             order_modify(orders=orders_selfpaid)
+            soap_confirm()
         elif df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'All-free'.upper():
-            # 直接出單
-            pass
+            soap_confirm()
         else:
-            auto.Logger.WriteLine(f"UNKNOWN CHARGE TYPE", auto.ConsoleColor.Red)
-        
-        soap_save() # FIXME 下面功能完成就可以去掉
-        # # TODO 出單
+            auto.Logger.WriteLine(f"{hisno}|UNKNOWN CHARGE TYPE", auto.ConsoleColor.Red)
+            soap_save()
 
-        # if (df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'NHI'.upper()) or (df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-1'.upper()) or (df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-2'.upper()):
 
-        #     # 第二次ditto # TODO 考慮改成retrieve比較快?
-        #     res = main_ditto(hisno)
-        #     if res == False:
-        #         continue
+def transform_side_to_route(side: str):
+    if side.strip().upper() == 'OD':
+        return 'IED'
+    elif side.strip().upper() == 'OS':
+        return 'IES'
+    elif side.strip().upper() == 'OU':
+        return 'IEU'
+    else:
+        auto.Logger.WriteLine(f"UNKNOWN SIDE", auto.ConsoleColor.Red)
+        side = input("Which is the side of the surgery (1:R|2:L|3:B)? ").strip()
+        if side == '1':
+            return 'IED'
+        elif side == '2':
+            return 'IES'
+        elif side == '3':
+            return 'IEU'
 
-        #     # 輔助轉換函數
-        #     transform_side_to_route = {
-        #         'OD': 'IED',
-        #         'OS': 'IES',
-        #         'OU': 'IEU',
-        #     }
-        #     # 處理anti-VEGF藥物
-        #     antiVEGF = [{
-        #         'name': df.loc[hisno, config_schedule['COL_DRUGTYPE']].strip(),
-        #         'charge': '',
-        #         'dose': '',
-        #         'frequency': 'STAT',
-        #         'route': transform_side_to_route[side],
-        #         'duration': '',
-        #         'eyedrop': True,
-        #         'default': False,
-        #         'same_index': 0
-        #     }]
-        #     if df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'NHI'.upper():
-        #         drug_add(antiVEGF)
-        #         drug_modify(antiVEGF)
-        #     elif (df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-1'.upper()) or (df.loc[hisno, config_schedule['COL_CHARGE']].strip().upper() == 'SP-2'.upper()):
-        #         antiVEGF['charge'] = 'Y'
-        #         drug_add(antiVEGF)
-        #         drug_modify(antiVEGF)
-            
-        #     # TODO 出單
+
+def transform_side_to_site(side: str):
+    if side.strip().upper() == 'OD':
+        return 'R'
+    elif side.strip().upper() == 'OS':
+        return 'L'
+    elif side.strip().upper() == 'OU':
+        return 'B'
+    else:
+        auto.Logger.WriteLine(f"UNKNOWN SIDE", auto.ConsoleColor.Red)
+        side = input("Which is the side of the surgery (1:R|2:L|3:B)? ").strip()
+        if side == '1':
+            return 'R'
+        elif side == '2':
+            return 'L'
+        elif side == '3':
+            return 'B'
 
 
 def main():
@@ -2417,7 +2487,7 @@ CONFIG = {}
 UPDATER_OWNER = 'zmh00'
 UPDATER_REPO = 'vghbot_opd'
 UPDATER_FILENAME = 'opd'
-UPDATER_VERSION_TAG = 'v1.3'
+UPDATER_VERSION_TAG = 'v1.4'
 
 gc = gsheet.GsheetClient()
 CONFIG.update(gc.get_col_dict(gsheet.GSHEET_SPREADSHEET, gsheet.GSHEET_WORKSHEET_CONFIG))
