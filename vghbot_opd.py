@@ -1059,22 +1059,24 @@ def order_modify(orders: list[dict], all=False):
             c_charge = charge.GetValuePattern().SetValue(orders[0]['charge'])
         # 按全選
         click_retry(window_alterord.ButtonControl(searchDepth=1, AutomationId="btnAOrdSelectAll"))
-    for order in orders:
-        # 設定位置
-        if order.get('site','') !='':
-            c_site = site.GetValuePattern().SetValue(order['site'])
-        # 設定數量
-        if order.get('number','') !='':
-            c_number = number.GetValuePattern().SetValue(order['number'])
-        # 設定費用
-        if order.get('charge','') !='':
-            c_charge = charge.GetValuePattern().SetValue(order['charge'])
-        
-        target_list = datagrid_search(order['name'], datagrid, only_one=True)
-        click_blockinput(target_list[0]) # click_datagrid(datagrid, target_list=target_list, setfocus=False) # 這是正確方式，但當order或藥物不會超過一頁需要使用scroll button時，可以直接click來加速
-
-    # 點擊確認 => 不能用Invoke，且上面選擇項目後的click不能改變focus，否則選擇項目會被自動取消
-    click_blockinput(group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdOK")) 
+        # 點擊確認 => 不能用Invoke，且上面選擇項目後的click不能改變focus，否則選擇項目會被自動取消
+        click_blockinput(group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdOK")) 
+    else:
+        for order in orders:
+            # 設定位置
+            if order.get('site','') !='':
+                c_site = site.GetValuePattern().SetValue(order['site'])
+            # 設定數量
+            if order.get('number','') !='':
+                c_number = number.GetValuePattern().SetValue(order['number'])
+            # 設定費用
+            if order.get('charge','') !='':
+                c_charge = charge.GetValuePattern().SetValue(order['charge'])
+            
+            target_list = datagrid_search(order['name'], datagrid, only_one=True)
+            click_blockinput(target_list[0]) # click_datagrid(datagrid, target_list=target_list, setfocus=False) # 這是正確方式，但當order或藥物不會超過一頁需要使用scroll button時，可以直接click來加速
+            # 點擊確認 => 不能用Invoke，且上面選擇項目後的click不能改變focus，否則選擇項目會被自動取消
+            click_blockinput(group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdOK")) 
 
     # 點擊返回主畫面
     group.ButtonControl(searchDepth=1, AutomationId="btnAlterOrdReturn").GetInvokePattern().Invoke()
