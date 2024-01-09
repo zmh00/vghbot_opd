@@ -885,7 +885,7 @@ def main_excluded_hisno_list(hisno_list):
 
 def package_open(index: int = -1, search_term: str = None):
     '''
-    點擊組套功能(可以使用index[起始為0且需+3]或是用search term去搜尋組套視窗的項目)
+    點擊組套功能(可以使用index[起始為0且需+3]或是用search term去搜尋組套視窗的項目，返回第一個符合字串)
     '''
     try:
         # Window SOAP 為起點
@@ -2244,12 +2244,15 @@ def main_cata():
 
                     # 選擇phaco模式
                     if df.loc[hisno, config_schedule['COL_LENSX']].strip() == '': # 沒有選擇lensx
-                        package_open(index = 31)
+                        package_open(search_term='白內障 手術組套')
+                        # package_open(index = 29)
                     elif df.loc[hisno, config_schedule['COL_LENSX']].strip().lower() == 'lensx':
-                        package_open(index = 32)
+                        package_open(search_term='(LENSX)')
+                        # package_open(index = 30)
                     else:
                         auto.Logger.WriteLine(f"Lensx資訊辨識問題({df.loc[hisno,config_schedule['COL_LENSX']].strip()}) 先以NHI組套處理", auto.ConsoleColor.Red)
-                        package_open(index = 31)
+                        package_open(search_term='白內障 手術組套')
+                        # package_open(index = 29)
                     
                     # 取得刀表iol資訊
                     iol = df.loc[hisno, config_schedule['COL_IOL']].strip()
@@ -2263,9 +2266,11 @@ def main_cata():
                     
                     # 打開package
                     if iol_search_term in CONFIG['NHI_IOL']:
-                        package_open(index=29)  # NHI IOL
+                        package_open(search_term='健保IOL')
+                        # package_open(index=27)  # NHI IOL
                     else:
-                        package_open(index=30)  # SP IOL
+                        package_open(search_term='自費IOL')
+                        # package_open(index=28)  # SP IOL
                     # IOL和OVD package設定
                     package_detail(order=[iol_search_term, ovd])
                     # package_iol_ovd(iol=iol_search_term, ovd=ovd)
@@ -2497,7 +2502,7 @@ CONFIG = {}
 UPDATER_OWNER = 'zmh00'
 UPDATER_REPO = 'vghbot_opd'
 UPDATER_FILENAME = 'opd'
-UPDATER_VERSION_TAG = 'v1.4'
+UPDATER_VERSION_TAG = 'v1.5'
 
 gc = gsheet.GsheetClient()
 CONFIG.update(gc.get_col_dict(gsheet.GSHEET_SPREADSHEET, gsheet.GSHEET_WORKSHEET_CONFIG))
